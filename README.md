@@ -44,15 +44,15 @@ MT5 → data_downloader → feature_engine → ensemble_model
 
 ## Requisitos
 
-- **Windows 10/11** (64-bit)
+- **Windows 10/11 (64-bit) o Linux** (cualquier distro con Python 3.8+)
 - **Python 3.10+** — [python.org](https://www.python.org/downloads/)
-- **MetaTrader 5** — [descargar aquí](https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe)
+- **MetaTrader 5** — [descargar aquí](https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe) (en Linux se instala dentro de Wine, ver más abajo)
 - **Cuenta demo FBS** — [fbs.com](https://fbs.com)
 - **Ollama** (opcional, para LLM) — [ollama.ai](https://ollama.ai)
 
 ---
 
-## Instalación
+## Instalación — Windows
 
 ### 1. Clonar el repositorio
 
@@ -90,20 +90,102 @@ MT5_SERVER=FBS-Demo
 
 ---
 
+## Instalación — Linux
+
+El paquete Python `MetaTrader5` solo existe para Windows (habla con el terminal
+vía un canal IPC nativo de Windows), así que en Linux el terminal MT5 corre
+dentro de **Wine**, y este bot se conecta a él a través del puente
+[`mt5linux`](https://github.com/lucas-campagna/mt5linux), que expone la misma
+API (`mt5.initialize()`, `mt5.copy_rates_from_pos()`, etc.) por RPyC. El resto
+del bot (pandas, XGBoost, LightGBM, CatBoost...) corre nativo en Linux —
+solo el terminal y su API Python viven bajo Wine.
+
+### 1. Clonar el repositorio
+
+```bash
+git clone https://github.com/itanmidnight-ux/BOT-Trading.git
+cd BOT-Trading
+```
+
+### 2. Instalar todo automáticamente
+
+```bash
+chmod +x install.sh run_test.sh start_training.sh
+./install.sh
+```
+
+Esto crea el virtualenv, instala dependencias (incluye `mt5linux` en vez de
+`MetaTrader5`), verifica Wine/Xvfb, descarga modelo Ollama (phi3:mini) y
+genera `.env`.
+
+### 3. Instalar MT5 y su Python dentro de Wine
+
+```bash
+sudo apt install wine64 winetricks xvfb   # Debian/Ubuntu; adapta a tu distro
+
+# Terminal MT5 dentro de un prefix de Wine dedicado
+export WINEPREFIX=~/.wine_mt5
+wget https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe
+wine mt5setup.exe
+
+# Python de Windows dentro del mismo prefix (necesario para mt5linux server)
+winetricks python3   # o instala manualmente un instalador de python.org con wine
+wine python -m pip install MetaTrader5 mt5linux
+```
+
+### 4. Levantar el terminal + el puente mt5linux
+
+```bash
+# Display virtual (servidores sin entorno gráfico)
+Xvfb :99 -screen 0 1024x768x16 &
+export DISPLAY=:99
+
+# Servidor puente: corre con el Python de Wine, reenvía llamadas al terminal
+WINEPREFIX=~/.wine_mt5 wine python -m mt5linux --host 0.0.0.0 <ruta al python.exe de Wine>
+```
+
+Deja este proceso corriendo en background (screen/tmux/systemd) mientras el
+bot esté operando en modo demo/real.
+
+### 5. Configurar credenciales
+
+Edita el archivo `.env` (generado por `install.sh`):
+
+```env
+TRADING_MODE=demo
+MT5_LOGIN=TU_LOGIN
+MT5_PASSWORD=TU_PASSWORD
+MT5_SERVER=FBS-Demo
+DISPLAY=:99
+WINEPREFIX=/home/tu_usuario/.wine_mt5
+MT5_EXE=/home/tu_usuario/.wine_mt5/drive_c/Program Files/MetaTrader 5/terminal64.exe
+MT5_BRIDGE_HOST=localhost
+MT5_BRIDGE_PORT=8001
+```
+
+---
+
 ## Uso
 
 ### Modo TEST (sin MT5, sin cuenta real)
 
-Entrena el modelo con datos de yfinance y hace backtest. **No necesita MT5 instalado.**
+Entrena el modelo con datos de yfinance y hace backtest. **No necesita MT5 ni Wine instalados** — funciona igual en Windows y Linux.
 
 ```bat
 run_test.bat
+```
+```bash
+./run_test.sh
 ```
 
 o desde terminal:
 
 ```bat
 .venv\Scripts\activate
+python main.py --test
+```
+```bash
+source .venv/bin/activate
 python main.py --test
 ```
 
@@ -114,9 +196,15 @@ python main.py --test
 python main.py
 # Seleccionar opción 3
 ```
+```bash
+source .venv/bin/activate
+python main.py
+# Seleccionar opción 3
+```
 
 ### Modo DEMO (trading real con cuenta demo)
 
+**Windows:**
 1. Abre MetaTrader 5
 2. Inicia sesión en tu cuenta FBS Demo
 3. Deja MT5 abierto en segundo plano
@@ -124,6 +212,17 @@ python main.py
 
 ```bat
 .venv\Scripts\activate
+python main.py
+# Seleccionar opción 1
+```
+
+**Linux:**
+1. Levanta Xvfb, el terminal MT5 bajo Wine y el puente `mt5linux` (ver arriba)
+2. Inicia sesión en tu cuenta FBS Demo dentro del terminal (bajo Wine)
+3. Ejecuta:
+
+```bash
+source .venv/bin/activate
 python main.py
 # Seleccionar opción 1
 ```
@@ -179,8 +278,11 @@ LLM evalúa resultado → Genera objetivo siguiente
 BOT-Trading/
 ├── main.py                 # Punto de entrada
 ├── install.bat             # Instalador Windows
-├── run_test.bat            # Modo test sin MT5
-├── start_training.bat      # Entrenamiento offline
+├── install.sh              # Instalador Linux
+├── run_test.bat            # Modo test sin MT5 (Windows)
+├── run_test.sh             # Modo test sin MT5 (Linux)
+├── start_training.bat      # Entrenamiento offline (Windows)
+├── start_training.sh       # Entrenamiento offline (Linux)
 ├── requirements.txt
 ├── .env                    # Credenciales (NO subir a git)
 ├── config/
@@ -188,6 +290,7 @@ BOT-Trading/
 │   ├── constants.py        # Constantes del sistema
 │   └── .env.example        # Plantilla de configuración
 ├── core/                   # Módulos del bot (12 en pipeline)
+│   └── mt5_compat.py       # Shim multiplataforma (MetaTrader5 nativo / mt5linux)
 ├── analysis/               # Reportes y optimización
 ├── utils/                  # Logger, display, notifier
 ├── tests/                  # 40 tests automatizados
@@ -202,6 +305,10 @@ BOT-Trading/
 
 ```bat
 .venv\Scripts\activate
+python -m pytest tests/ -v
+```
+```bash
+source .venv/bin/activate
 python -m pytest tests/ -v
 ```
 

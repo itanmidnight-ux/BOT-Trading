@@ -56,8 +56,8 @@ class TradeManager:
     def open_market_order(self, symbol: str, direction: str, lots: float,
                           sl_price: float, tp_price: float) -> TradeResult:
         try:
-            import MetaTrader5 as mt5
-        except ImportError:
+            from core.mt5_compat import mt5
+        except Exception:
             return TradeResult(0, symbol, direction, lots, 0, sl_price, tp_price,
                                0, datetime.utcnow(), -1, False, "MT5 no disponible")
 
@@ -105,8 +105,8 @@ class TradeManager:
     def close_position(self, ticket: int, symbol: str, direction: str,
                        lots: Optional[float] = None) -> bool:
         try:
-            import MetaTrader5 as mt5
-        except ImportError:
+            from core.mt5_compat import mt5
+        except Exception:
             return False
 
         positions = mt5.positions_get(ticket=ticket)
@@ -150,8 +150,8 @@ class TradeManager:
 
     def close_all_positions(self, symbol: Optional[str] = None) -> int:
         try:
-            import MetaTrader5 as mt5
-        except ImportError:
+            from core.mt5_compat import mt5
+        except Exception:
             return 0
 
         positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
@@ -168,8 +168,8 @@ class TradeManager:
 
     def modify_position_sl(self, ticket: int, symbol: str, new_sl: float) -> bool:
         try:
-            import MetaTrader5 as mt5
-        except ImportError:
+            from core.mt5_compat import mt5
+        except Exception:
             return False
 
         info = mt5.symbol_info(symbol)
@@ -188,8 +188,8 @@ class TradeManager:
 
     def get_open_positions(self, symbol: Optional[str] = None) -> list:
         try:
-            import MetaTrader5 as mt5
-        except ImportError:
+            from core.mt5_compat import mt5
+        except Exception:
             return []
         positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
         if not positions:
@@ -199,7 +199,7 @@ class TradeManager:
     # ── Private helpers ───────────────────────────────────────────────────────
 
     def _send_with_retry(self, request, max_retries: int = 3):
-        import MetaTrader5 as mt5
+        from core.mt5_compat import mt5
         for attempt in range(max_retries):
             result = mt5.order_send(request)
             if result is None:
