@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-import MetaTrader5 as mt5
 
+from core.mt5_compat import mt5
 from utils.logger import get_logger
 from config.constants import CANDLE_COLS
 from config import settings

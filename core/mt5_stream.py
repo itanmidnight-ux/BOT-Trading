@@ -28,10 +28,10 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Callable, Dict, Optional
 
-import MetaTrader5 as mt5
 import numpy as np
 import pandas as pd
 
+from core.mt5_compat import mt5
 from config.constants import CANDLE_COLS
 from utils.logger import get_logger
 
