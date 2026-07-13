@@ -142,9 +142,7 @@ class KellyEngine:
         price: float,
     ) -> float:
         """Convert a Kelly fraction to a lot size, respecting min/max bounds."""
-        leverage = (
-            settings.LEVERAGE_PHASE2 if "XAU" in symbol else settings.LEVERAGE_PHASE1
-        )
+        leverage = settings.LEVERAGE_XAUUSD
         notional = capital * fraction * leverage
 
         if "XAU" in symbol:
@@ -175,9 +173,7 @@ class KellyEngine:
 
         margin_required = lots * contract_size / leverage
         """
-        leverage = (
-            settings.LEVERAGE_PHASE2 if "XAU" in symbol else settings.LEVERAGE_PHASE1
-        )
+        leverage = settings.LEVERAGE_XAUUSD
         contract_size = symbol_info.get("trade_contract_size", 100_000)
         margin_required = (lots * contract_size) / leverage
         sufficient = free_margin >= margin_required * 1.5
