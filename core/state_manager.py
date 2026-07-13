@@ -35,18 +35,14 @@ class StateManager:
     # ── Positions ─────────────────────────────────────────────────────────────
 
     def save_position(self, symbol: str, ticket: int, direction: str,
-                      lots: float, entry: float, sl: float, tp1: float, tp2: float):
+                      lots: float, entry: float, sl: float, tp: float):
         self._state["positions"][symbol] = {
             "ticket":          ticket,
             "direction":       direction,
             "lots":            lots,
-            "lots_remaining":  lots,
             "entry":           entry,
             "sl":              sl,
-            "tp1":             tp1,
-            "tp2":             tp2,
-            "phase":           1,
-            "trailing_sl":     None,
+            "tp":              tp,
             "bars_open":       0,
             "open_time":       datetime.utcnow().isoformat(),
         }
@@ -133,7 +129,7 @@ class StateManager:
                 direction = SIGNAL_BUY if mt5_pos.type == 0 else SIGNAL_SELL
                 self.save_position(symbol, mt5_pos.ticket, direction,
                                    mt5_pos.volume, mt5_pos.price_open,
-                                   mt5_pos.sl, mt5_pos.tp, mt5_pos.tp)
+                                   mt5_pos.sl, mt5_pos.tp)
                 actions.append(f"ADOPTED_{symbol}")
 
         return actions

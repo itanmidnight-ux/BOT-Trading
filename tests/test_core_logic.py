@@ -144,13 +144,14 @@ class TestStateManager:
     def test_save_and_retrieve(self):
         from core.state_manager import StateManager
         sm = StateManager()
-        sm.save_position("EURUSD", 123, "BUY", 0.03, 1.0845, 1.0830, 1.0865, 1.0880)
-        assert sm.has_open_position("EURUSD")
-        pos = sm.get_position("EURUSD")
+        sm.save_position("XAUUSD", 123, "BUY", 0.01, 2400.00, 2399.00, 2401.20)
+        assert sm.has_open_position("XAUUSD")
+        pos = sm.get_position("XAUUSD")
         assert pos["ticket"]    == 123
         assert pos["direction"] == "BUY"
-        sm.clear_position("EURUSD")
-        assert not sm.has_open_position("EURUSD")
+        assert pos["tp"]        == 2401.20
+        sm.clear_position("XAUUSD")
+        assert not sm.has_open_position("XAUUSD")
 
     def test_capital_update(self):
         from core.state_manager import StateManager
