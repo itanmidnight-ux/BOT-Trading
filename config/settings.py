@@ -87,7 +87,7 @@ XGB_PARAMS = {
 
 # ── Spread simulation (backtest) ───────────────────────────────────────────────
 SPREAD_POINTS_EURUSD = _get("SPREAD_POINTS_EURUSD", 10)
-SPREAD_POINTS_XAUUSD = _get("SPREAD_POINTS_XAUUSD", 300)
+SPREAD_POINTS_XAUUSD = _get("SPREAD_POINTS_XAUUSD", 30)
 
 # ── Time filters ───────────────────────────────────────────────────────────────
 NO_TRADE_HOURS_UTC = _get("NO_TRADE_HOURS_UTC", [22, 23, 0, 1])

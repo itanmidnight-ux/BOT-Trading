@@ -219,6 +219,30 @@ class TestBacktester:
         # No crash = sin data leakage por índices fuera de rango
         assert metrics is not None
 
+    def test_one_bar_max_hold(self):
+        """Cada trade se cierra en la vela siguiente a la entrada, nunca más tarde."""
+        from core.backtester import Backtester
+        from core.feature_engine import FeatureEngine
+        from unittest.mock import MagicMock
+        import numpy as np
+
+        fe   = FeatureEngine()
+        df   = _make_ohlcv(500)
+        df_f = fe.compute(df)
+        df_f = fe.add_target(df_f, "XAUUSD")
+        df_f = df_f.dropna().reset_index(drop=True)
+        feature_cols = fe.get_feature_cols()
+
+        mock_model = MagicMock()
+        mock_model.predict_proba.return_value = np.array([[0.3, 0.7]])
+
+        bt      = Backtester("XAUUSD")
+        metrics = bt.run(df_f, mock_model, feature_cols, 0.62, 20.0)
+
+        trades_df = metrics["trades_df"]
+        assert len(trades_df) > 0
+        assert (trades_df["bars_open"] == 1).all()
+
 
 class TestKellyEngine:
     def test_calculate_fraction(self):

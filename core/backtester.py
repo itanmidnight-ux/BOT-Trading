@@ -1,6 +1,7 @@
 """
 Backtester vela a vela estilo MT5.
-Incluye simulación de spread, slippage, trailing SL y TP parcial.
+Ciclo de 1 vela: cada trade se abre y se cierra en la vela siguiente a la
+señal — sin TP2, sin trailing, sin hold multi-vela. Simula spread y slippage.
 """
 import random
 from datetime import datetime
@@ -26,7 +27,11 @@ class Backtester:
             signal_threshold: float, initial_capital: float,
             regime_detector=None, mtf_analyzer=None) -> dict:
         """
-        Simula trading vela a vela sobre df (set de test).
+        Simula trading vela a vela sobre df (set de test). Un trade por vela:
+        se fuerza el cierre del trade abierto y de inmediato se evalúa/abre
+        el siguiente, sin huecos. signal_threshold/regime_detector/mtf_analyzer
+        se aceptan por compatibilidad de firma pero ya no filtran señales —
+        el único filtro es el spread simulado vs MAX_SPREAD_USD.
         Retorna dict con métricas completas.
         """
         self._results = []
@@ -34,7 +39,6 @@ class Backtester:
         open_trade    = None
         equity_curve  = [capital]
 
-        # Spread y slippage simulados
         is_xau   = "XAU" in self.symbol
         spread   = (settings.SPREAD_POINTS_XAUUSD if is_xau else settings.SPREAD_POINTS_EURUSD)
         point    = 0.01 if is_xau else 0.00001
@@ -47,26 +51,22 @@ class Backtester:
                     "time": row.get("time", i)}
             atr  = float(row["atr"]) if "atr" in row else spread_f * 15
 
-            # ── Gestión de trade abierto ─────────────────────────────────────
+            # ── Cierre forzado del trade abierto en la vela anterior ─────────
             if open_trade is not None:
                 open_trade["bars_open"] += 1
-                exit_result = self._check_exit(open_trade, bar, atr)
-                if exit_result:
-                    pnl, reason, exit_price = exit_result
-                    capital += pnl
-                    self._record_trade(open_trade, exit_price, pnl, reason, capital)
-                    equity_curve.append(capital)
-                    open_trade = None
-                    continue
-
-            # ── Nueva señal ──────────────────────────────────────────────────
-            if open_trade is not None:
-                continue
+                pnl, reason, exit_price = self._check_exit(open_trade, bar, atr)
+                capital += pnl
+                self._record_trade(open_trade, exit_price, pnl, reason, capital)
+                equity_curve.append(capital)
+                open_trade = None
 
             if i + 1 >= len(df):
                 break
 
-            # Features de la vela actual
+            # ── Único filtro: spread por encima del máximo tolerado ──────────
+            if spread_f > settings.MAX_SPREAD_USD:
+                continue
+
             try:
                 x = df[feature_cols].iloc[i:i+1].fillna(0)
                 proba_buy = float(model.predict_proba(x)[0, 1])
@@ -74,48 +74,23 @@ class Backtester:
                 continue
 
             direction, proba = self._get_direction(proba_buy)
-            if proba < signal_threshold:
-                continue
 
-            # Filtro de régimen si está disponible
-            if regime_detector is not None:
-                regime, _ = regime_detector.detect(df.iloc[max(0, i-100):i+1])
-                if regime in (constants.REGIME_NO_TRADE, constants.REGIME_VOLATILE):
-                    continue
-            else:
-                # Filtro horario básico
-                try:
-                    hour = pd.to_datetime(row.get("time", 0)).hour
-                    if hour in settings.NO_TRADE_HOURS_UTC:
-                        continue
-                except Exception:
-                    pass
-
-            # Entrada al open de la vela siguiente + slippage
-            if i + 1 >= len(df):
-                break
             next_bar = df.iloc[i + 1]
             slippage = random.uniform(0, 0.5) * point
             entry    = next_bar["open"] + (slippage if direction == constants.SIGNAL_BUY
                                            else -slippage)
-            # Añadir spread al BUY
             if direction == constants.SIGNAL_BUY:
                 entry += spread_f
 
-            # Kelly position sizing
             lots = self._calc_lots(capital, atr)
             if lots <= 0:
                 continue
 
-            # Niveles SL/TP
-            sl  = entry - atr * settings.ATR_SL_MULTIPLIER  if direction == constants.SIGNAL_BUY \
-                  else entry + atr * settings.ATR_SL_MULTIPLIER
-            tp1 = entry + atr * settings.ATR_TP1_MULTIPLIER if direction == constants.SIGNAL_BUY \
-                  else entry - atr * settings.ATR_TP1_MULTIPLIER
-            tp2 = entry + atr * settings.ATR_TP2_MULTIPLIER if direction == constants.SIGNAL_BUY \
-                  else entry - atr * settings.ATR_TP2_MULTIPLIER
+            sl = entry - atr * settings.ATR_SL_MULTIPLIER  if direction == constants.SIGNAL_BUY \
+                 else entry + atr * settings.ATR_SL_MULTIPLIER
+            tp = entry + atr * settings.ATR_TP1_MULTIPLIER if direction == constants.SIGNAL_BUY \
+                 else entry - atr * settings.ATR_TP1_MULTIPLIER
 
-            # Valor pip
             pip_value = self._pip_value(lots, self.symbol)
 
             open_trade = {
@@ -123,24 +98,19 @@ class Backtester:
                 "direction":  direction,
                 "lots":       lots,
                 "sl":         sl,
-                "tp1":        tp1,
-                "tp2":        tp2,
-                "phase":      1,
-                "trailing_sl": None,
-                "partial_done": False,
-                "bars_open":   0,
-                "open_time":   row.get("time", i),
-                "pip_value":   pip_value,
+                "tp":         tp,
+                "bars_open":  0,
+                "open_time":  row.get("time", i),
+                "pip_value":  pip_value,
                 "atr_entry":  atr,
-                "proba":       proba,
+                "proba":      proba,
             }
 
-        # Cierra trade abierto al final
         if open_trade is not None:
             last = df.iloc[-1]
             pnl  = self._calc_pnl(open_trade, last["close"])
             capital += pnl
-            self._record_trade(open_trade, last["close"], pnl, "END_OF_DATA", capital)
+            self._record_trade(open_trade, last["close"], pnl, constants.EXIT_BAR_CLOSE, capital)
             equity_curve.append(capital)
 
         return self._compute_metrics(initial_capital, capital, equity_curve)
@@ -148,64 +118,20 @@ class Backtester:
     # ── Exit logic ────────────────────────────────────────────────────────────
 
     def _check_exit(self, trade: dict, bar: dict, atr: float):
-        is_buy   = trade["direction"] == constants.SIGNAL_BUY
+        """Siempre devuelve un resultado: SL, TP, o cierre forzado al close de la vela."""
+        is_buy = trade["direction"] == constants.SIGNAL_BUY
         high, low, close = bar["high"], bar["low"], bar["close"]
 
-        # SL hit
         if is_buy and low <= trade["sl"]:
-            pnl = self._calc_pnl(trade, trade["sl"])
-            return pnl, constants.EXIT_SL, trade["sl"]
+            return self._calc_pnl(trade, trade["sl"]), constants.EXIT_SL, trade["sl"]
         if not is_buy and high >= trade["sl"]:
-            pnl = self._calc_pnl(trade, trade["sl"])
-            return pnl, constants.EXIT_SL, trade["sl"]
+            return self._calc_pnl(trade, trade["sl"]), constants.EXIT_SL, trade["sl"]
 
-        # Fase 1: TP1
-        if trade["phase"] == 1:
-            if (is_buy and high >= trade["tp1"]) or (not is_buy and low <= trade["tp1"]):
-                # Cierra 50%, actualiza trade para fase 2
-                spread_adj = atr * 0.05
-                trade["sl"]          = trade["entry"] + spread_adj if is_buy else trade["entry"] - spread_adj
-                trade["lots"]       *= (1 - settings.PARTIAL_TP_FRACTION)
-                trade["lots"]        = max(trade["lots"], settings.KELLY_MIN_LOTS)
-                trade["phase"]       = 2
-                trade["trailing_sl"] = trade["sl"]
-                trade["partial_done"] = True
-                # No cerramos completamente, solo actualizamos estado
-                return None
+        tp_hit = (is_buy and high >= trade["tp"]) or (not is_buy and low <= trade["tp"])
+        if tp_hit:
+            return self._calc_pnl(trade, trade["tp"]), constants.EXIT_TP, trade["tp"]
 
-        # Fase 2: trailing
-        if trade["phase"] == 2:
-            trail_dist = atr * settings.ATR_TRAILING_MULTIPLIER
-            if is_buy:
-                new_trail = close - trail_dist
-                if new_trail > trade.get("trailing_sl") or trade["trailing_sl"] is None:
-                    trade["trailing_sl"] = max(new_trail, trade["sl"])
-                if high >= trade["tp2"]:
-                    pnl = self._calc_pnl(trade, trade["tp2"])
-                    return pnl, constants.EXIT_TP2, trade["tp2"]
-                if low <= trade["trailing_sl"]:
-                    pnl = self._calc_pnl(trade, trade["trailing_sl"])
-                    return pnl, constants.EXIT_TRAILING, trade["trailing_sl"]
-            else:
-                new_trail = close + trail_dist
-                if new_trail < trade.get("trailing_sl") or trade["trailing_sl"] is None:
-                    trade["trailing_sl"] = min(new_trail, trade["sl"])
-                if low <= trade["tp2"]:
-                    pnl = self._calc_pnl(trade, trade["tp2"])
-                    return pnl, constants.EXIT_TP2, trade["tp2"]
-                if high >= trade["trailing_sl"]:
-                    pnl = self._calc_pnl(trade, trade["trailing_sl"])
-                    return pnl, constants.EXIT_TRAILING, trade["trailing_sl"]
-
-        # Time exit
-        if trade["bars_open"] >= 30:
-            min_prog = atr * 0.2
-            progress = (close - trade["entry"]) if is_buy else (trade["entry"] - close)
-            if progress < min_prog:
-                pnl = self._calc_pnl(trade, close)
-                return pnl, constants.EXIT_TIME, close
-
-        return None
+        return self._calc_pnl(trade, close), constants.EXIT_BAR_CLOSE, close
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -230,7 +156,7 @@ class Backtester:
 
     def _calc_lots(self, capital: float, atr: float) -> float:
         fraction = settings.KELLY_BOOTSTRAP_FRAC
-        leverage = settings.LEVERAGE_PHASE1 if "XAU" not in self.symbol else settings.LEVERAGE_PHASE2
+        leverage = settings.LEVERAGE_XAUUSD
         notional = capital * fraction * leverage
         if "XAU" in self.symbol:
             lots = notional / (2300 * 100)
@@ -252,7 +178,7 @@ class Backtester:
             "entry":       trade["entry"],
             "exit_price":  exit_price,
             "sl":          trade["sl"],
-            "tp1":         trade["tp1"],
+            "tp":          trade["tp"],
             "pips":        pips,
             "pnl_usd":     pnl,
             "capital":     round(capital, 4),
@@ -280,11 +206,9 @@ class Backtester:
         net_pnl       = final_capital - initial_capital
         roi           = net_pnl / initial_capital
 
-        # Sharpe (diario, simplificado)
         returns = df["pnl_usd"].values
         sharpe  = (np.mean(returns) / (np.std(returns) + 1e-9)) * np.sqrt(252) if len(returns) > 1 else 0
 
-        # Max drawdown
         peak    = initial_capital
         max_dd  = 0.0
         for eq in equity_curve:
@@ -294,7 +218,6 @@ class Backtester:
             if dd > max_dd:
                 max_dd = dd
 
-        # Guarda CSV
         self._save_csv(df)
 
         return {
