@@ -89,14 +89,12 @@ class TestRegimeDetector:
 
 
 class TestExitManager:
-    def _make_position(self, direction="BUY", phase=1):
+    def _make_position(self, direction="BUY"):
         from core.exit_manager import OpenPosition
         from datetime import datetime
         return OpenPosition(
-            ticket=1, symbol="EURUSD", direction=direction,
-            lots=0.03, lots_remaining=0.03,
-            entry=1.0845, sl=1.0830, tp1=1.0865, tp2=1.0880,
-            phase=phase, trailing_sl=None,
+            ticket=1, symbol="XAUUSD", direction=direction,
+            lots=0.01, entry=2400.00, sl=2399.00, tp=2401.20,
             open_time=datetime.utcnow(), bars_open=0,
         )
 
@@ -104,42 +102,42 @@ class TestExitManager:
         from core.exit_manager import ExitManager
         em  = ExitManager()
         pos = self._make_position("BUY")
-        bar = {"open": 1.0840, "high": 1.0842, "low": 1.0825, "close": 1.0828, "time": 1}
-        action = em.evaluate(pos, bar, atr=0.00120)
+        bar = {"open": 2399.80, "high": 2399.90, "low": 2398.50, "close": 2398.80, "time": 1}
+        action = em.evaluate(pos, bar, atr=1.0)
         assert action.action == "CLOSE_FULL"
         assert action.reason == "SL"
 
-    def test_tp1_hit_buy(self):
+    def test_tp_hit_buy(self):
         from core.exit_manager import ExitManager
         em  = ExitManager()
         pos = self._make_position("BUY")
-        bar = {"open": 1.0860, "high": 1.0870, "low": 1.0858, "close": 1.0868, "time": 1}
-        action = em.evaluate(pos, bar, atr=0.00120)
-        assert action.action == "CLOSE_PARTIAL"
-        assert action.new_sl is not None
+        bar = {"open": 2400.50, "high": 2401.50, "low": 2400.40, "close": 2401.30, "time": 1}
+        action = em.evaluate(pos, bar, atr=1.0)
+        assert action.action == "CLOSE_FULL"
+        assert action.reason == "TP"
 
-    def test_hold(self):
+    def test_forced_bar_close_when_neither_sl_nor_tp_hit(self):
         from core.exit_manager import ExitManager
         em  = ExitManager()
         pos = self._make_position("BUY")
-        bar = {"open": 1.0846, "high": 1.0850, "low": 1.0843, "close": 1.0848, "time": 1}
-        action = em.evaluate(pos, bar, atr=0.00120)
-        assert action.action == "HOLD"
+        bar = {"open": 2400.10, "high": 2400.60, "low": 2399.80, "close": 2400.40, "time": 1}
+        action = em.evaluate(pos, bar, atr=1.0)
+        assert action.action == "CLOSE_FULL"
+        assert action.reason == "BAR_CLOSE"
 
     def test_calc_levels_buy(self):
         from core.exit_manager import ExitManager
         em     = ExitManager()
-        levels = em.calc_levels("EURUSD", "BUY", 1.0845, 0.00100)
-        assert levels["sl"]  < 1.0845
-        assert levels["tp1"] > 1.0845
-        assert levels["tp2"] > levels["tp1"]
+        levels = em.calc_levels("XAUUSD", "BUY", 2400.00, 1.0)
+        assert levels["sl"] < 2400.00
+        assert levels["tp"] > 2400.00
 
     def test_calc_levels_sell(self):
         from core.exit_manager import ExitManager
         em     = ExitManager()
-        levels = em.calc_levels("EURUSD", "SELL", 1.0845, 0.00100)
-        assert levels["sl"]  > 1.0845
-        assert levels["tp1"] < 1.0845
+        levels = em.calc_levels("XAUUSD", "SELL", 2400.00, 1.0)
+        assert levels["sl"] > 2400.00
+        assert levels["tp"] < 2400.00
 
 
 class TestStateManager:
