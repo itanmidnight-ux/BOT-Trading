@@ -19,7 +19,7 @@ class LiveTrader:
                  feature_engine, model_updater, regime_detector,
                  mtf_analyzer, signal_generator, kelly_engine,
                  risk_manager, trade_manager, exit_manager,
-                 state_manager, data_updater, capital_scaler,
+                 state_manager, data_updater,
                  auto_improver):
         self.symbol         = symbol
         self._conn          = mt5_connector
@@ -35,7 +35,6 @@ class LiveTrader:
         self._exit          = exit_manager
         self._state         = state_manager
         self._data_upd      = data_updater
-        self._capital_scaler = capital_scaler
         self._improver      = auto_improver
 
         self._running       = False
@@ -120,18 +119,7 @@ class LiveTrader:
             if self._state.has_open_position(self.symbol):
                 self._manage_open_position(bar, atr, equity)
 
-            # 7. Chequeo de fase
-            old_capital = self._state.capital
-            transition  = self._capital_scaler.check_transition(old_capital, equity)
-            if transition:
-                notifier.notify(notifier.PHASE_CHANGE, {
-                    "phase":   transition["phase"],
-                    "capital": equity,
-                    "symbol":  transition.get("symbol", self.symbol),
-                })
-                self._state.phase = transition["phase"]
-
-            # 8. Nueva señal (si no hay posición abierta)
+            # 7. Nueva señal (si no hay posición abierta)
             if not self._state.has_open_position(self.symbol):
                 safe, reason = self._risk.check_all(
                     self.symbol, equity, atr, atr_mean, free_margin, margin
@@ -176,7 +164,10 @@ class LiveTrader:
             _log.error(f"Error en on_bar_close: {e}", exc_info=True)
 
     def _manage_open_position(self, bar: dict, atr: float, equity: float):
-        """Evalúa y gestiona la posición abierta."""
+        """
+        Evalúa la posición abierta. Ciclo de 1 vela: evaluate() siempre
+        devuelve CLOSE_FULL (por SL, TP, o forzado al cierre de la vela).
+        """
         pos_data = self._state.get_position(self.symbol)
         if pos_data is None:
             return
@@ -186,79 +177,47 @@ class LiveTrader:
             ticket     = pos_data["ticket"],
             symbol     = self.symbol,
             direction  = pos_data["direction"],
-            lots       = pos_data.get("lots_remaining", pos_data["lots"]),
-            lots_remaining = pos_data.get("lots_remaining", pos_data["lots"]),
+            lots       = pos_data["lots"],
             entry      = pos_data["entry"],
             sl         = pos_data["sl"],
-            tp1        = pos_data["tp1"],
-            tp2        = pos_data["tp2"],
-            phase      = pos_data.get("phase", 1),
-            trailing_sl = pos_data.get("trailing_sl"),
+            tp         = pos_data["tp"],
             open_time  = datetime.fromisoformat(pos_data["open_time"]) if isinstance(pos_data["open_time"], str) else pos_data["open_time"],
             bars_open  = pos_data.get("bars_open", 0),
         )
 
         action = self._exit.evaluate(position, bar, atr)
 
-        if action.action == "CLOSE_FULL":
-            success = self._trades.close_position(
-                position.ticket, self.symbol, position.direction
-            )
-            if success:
-                # Calcula PnL estimado
-                tick    = self._stream.get_latest_tick(self.symbol)
-                cur_p   = tick.get("bid" if position.direction == constants.SIGNAL_BUY else "ask", position.entry) if tick else position.entry
-                diff    = cur_p - position.entry if position.direction == constants.SIGNAL_BUY else position.entry - cur_p
-                pips    = diff / (0.00010 if "XAU" not in self.symbol else 0.1)
-                pnl     = pips * position.lots * (10 if "XAU" not in self.symbol else 100)
+        success = self._trades.close_position(
+            position.ticket, self.symbol, position.direction
+        )
+        if success:
+            tick    = self._stream.get_latest_tick(self.symbol)
+            cur_p   = tick.get("bid" if position.direction == constants.SIGNAL_BUY else "ask", position.entry) if tick else position.entry
+            diff    = cur_p - position.entry if position.direction == constants.SIGNAL_BUY else position.entry - cur_p
+            pips    = diff / 0.1
+            pnl     = pips * position.lots * 100
 
-                win = pnl > 0
-                self._pnl_today += pnl
-                self._trades_today += 1
-                if win:
-                    self._wins_today += 1
+            win = pnl > 0
+            self._pnl_today += pnl
+            self._trades_today += 1
+            if win:
+                self._wins_today += 1
 
-                self._state.record_trade_result(win)
-                self._state.capital = max(0, self._state.capital + pnl)
-                self._state.clear_position(self.symbol)
-                self._kelly.update(self.symbol, win, abs(pips))
+            self._state.record_trade_result(win)
+            self._state.capital = max(0, self._state.capital + pnl)
+            self._state.clear_position(self.symbol)
+            self._kelly.update(self.symbol, win, abs(pips))
 
-                notifier.notify(notifier.TRADE_CLOSE, {
-                    "symbol":    self.symbol,
-                    "direction": position.direction,
-                    "pips":      round(pips, 1),
-                    "pnl":       round(pnl, 4),
-                    "reason":    action.reason,
-                })
-
-        elif action.action == "CLOSE_PARTIAL":
-            half_lots = round(position.lots * settings.PARTIAL_TP_FRACTION, 2)
-            half_lots = max(half_lots, settings.KELLY_MIN_LOTS)
-            self._trades.close_position(position.ticket, self.symbol,
-                                        position.direction, lots=half_lots)
-            # Actualiza estado: fase 2, nuevo SL, trailing
-            self._state.update_position(self.symbol,
-                                         phase=2,
-                                         sl=action.new_sl,
-                                         trailing_sl=action.new_sl,
-                                         lots_remaining=position.lots - half_lots,
-                                         bars_open=position.bars_open)
-            self._trades.modify_position_sl(position.ticket, self.symbol, action.new_sl)
-
-        elif action.action == "MOVE_SL":
-            self._trades.modify_position_sl(position.ticket, self.symbol, action.new_sl)
-            self._state.update_position(self.symbol,
-                                         sl=action.new_sl,
-                                         trailing_sl=action.new_sl,
-                                         bars_open=position.bars_open)
-
-        elif action.action == "HOLD":
-            self._state.update_position(self.symbol, bars_open=position.bars_open)
+            notifier.notify(notifier.TRADE_CLOSE, {
+                "symbol":    self.symbol,
+                "direction": position.direction,
+                "pips":      round(pips, 1),
+                "pnl":       round(pnl, 4),
+                "reason":    action.reason,
+            })
 
     def _execute_signal(self, signal, equity: float, free_margin: float):
         """Ejecuta una señal: calcula lots, verifica margen, coloca orden."""
-        levels = self._exit.calc_levels(self.symbol, signal.direction, 0, signal.atr)
-
         # Precio actual como entrada estimada
         tick   = self._stream.get_latest_tick(self.symbol)
         if tick is None:
@@ -267,7 +226,6 @@ class LiveTrader:
         if entry <= 0:
             return
 
-        # Recalcula niveles con entry real
         levels = self._exit.calc_levels(self.symbol, signal.direction, entry, signal.atr)
 
         # Kelly position sizing
@@ -280,13 +238,12 @@ class LiveTrader:
             _log.warning(f"Margen insuficiente para {lots} lots — reduciendo a mínimo")
             lots = settings.KELLY_MIN_LOTS
 
-        # Enviar orden
         result = self._trades.open_market_order(
             symbol    = self.symbol,
             direction = signal.direction,
             lots      = lots,
             sl_price  = levels["sl"],
-            tp_price  = levels["tp1"],
+            tp_price  = levels["tp"],
         )
 
         if result.success:
@@ -297,8 +254,7 @@ class LiveTrader:
                 lots      = lots,
                 entry     = result.entry,
                 sl        = levels["sl"],
-                tp1       = levels["tp1"],
-                tp2       = levels["tp2"],
+                tp        = levels["tp"],
             )
             notifier.notify(notifier.TRADE_OPEN, {
                 "symbol":    self.symbol,
@@ -306,7 +262,7 @@ class LiveTrader:
                 "lots":      lots,
                 "entry":     result.entry,
                 "sl":        levels["sl"],
-                "tp1":       levels["tp1"],
+                "tp":        levels["tp"],
             })
         else:
             _log.warning(f"Orden fallida: {result.message}")
