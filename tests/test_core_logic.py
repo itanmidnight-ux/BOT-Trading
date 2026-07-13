@@ -50,9 +50,12 @@ class TestFeatureEngine:
         fe  = FeatureEngine()
         df  = _make_ohlcv(300)
         out = fe.compute(df)
-        out = fe.add_target(out, "EURUSD")
+        out = fe.add_target(out, "XAUUSD")
         assert "target" in out.columns
         assert set(out["target"].dropna().unique()).issubset({0, 1})
+        # Horizonte de 1 vela: solo la última fila queda sin target válido.
+        assert out["target"].iloc[:-1].notna().all()
+        assert out["target"].iloc[-1:].isna().all()
 
     def test_get_latest_features(self):
         from core.feature_engine import FeatureEngine

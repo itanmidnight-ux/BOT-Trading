@@ -151,7 +151,7 @@ class FeatureEngine:
         """
         Appends a binary classification target to *df*.
 
-        The target is 1 when the close price 3 candles ahead exceeds the
+        The target is 1 when the close price 1 candle ahead exceeds the
         current close by at least *pip_th*, otherwise 0.
 
         Parameters
@@ -161,7 +161,7 @@ class FeatureEngine:
 
         Returns
         -------
-        pd.DataFrame with 'target' column added (last 3 rows will be NaN).
+        pd.DataFrame with 'target' column added (last 1 row will be NaN).
         """
         if "USD" in symbol and "XAU" not in symbol:
             pip_th = 0.0003
@@ -169,11 +169,11 @@ class FeatureEngine:
             pip_th = 0.15
 
         df["target"] = (
-            df["close"].shift(-3) > df["close"] + pip_th
+            df["close"].shift(-1) > df["close"] + pip_th
         ).astype(float)
 
-        # The last 3 rows have no valid future close → set to NaN
-        df.loc[df.index[-3:], "target"] = np.nan
+        # The last row has no valid future close → set to NaN
+        df.loc[df.index[-1:], "target"] = np.nan
 
         logger.debug(
             "add_target: symbol=%s pip_th=%.5f target_mean=%.4f",
