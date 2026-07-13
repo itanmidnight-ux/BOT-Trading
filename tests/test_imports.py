@@ -19,6 +19,14 @@ def test_config_settings():
     assert SYMBOL_PHASE1 == "EURUSD"
     assert MIN_WIN_RATE_LIVE == 0.59
 
+def test_config_settings_scalp():
+    from config.settings import SYMBOL, LEVERAGE_XAUUSD, MAX_SPREAD_USD, ATR_SL_MULTIPLIER, ATR_TP1_MULTIPLIER
+    assert SYMBOL == "XAUUSD"
+    assert LEVERAGE_XAUUSD == 1
+    assert MAX_SPREAD_USD == 0.35
+    assert ATR_SL_MULTIPLIER == 1.0
+    assert ATR_TP1_MULTIPLIER == 1.2
+
 def test_utils_logger():
     from utils.logger import get_logger
     log = get_logger("test")

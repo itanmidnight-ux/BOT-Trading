@@ -21,10 +21,8 @@ SIGNAL_SELL = "SELL"
 SIGNAL_HOLD = "HOLD"
 
 EXIT_SL           = "SL"
-EXIT_TP1          = "TP1"
-EXIT_TP2          = "TP2"
-EXIT_TRAILING     = "TRAILING"
-EXIT_TIME         = "TIME_EXIT"
+EXIT_TP           = "TP"
+EXIT_BAR_CLOSE    = "BAR_CLOSE"
 EXIT_ADVERSE      = "ADVERSE"
 EXIT_EMERGENCY    = "EMERGENCY"
 

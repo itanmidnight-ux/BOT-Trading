@@ -35,6 +35,8 @@ SYMBOL_PHASE2              = _get("SYMBOL_PHASE2", "XAUUSD")
 CAPITAL_PHASE2_THRESHOLD   = _get("CAPITAL_PHASE2_THRESHOLD", 30.0)
 LEVERAGE_PHASE1            = _get("LEVERAGE_PHASE1", 3000)
 LEVERAGE_PHASE2            = _get("LEVERAGE_PHASE2", 1000)
+SYMBOL                     = _get("SYMBOL", "XAUUSD")
+LEVERAGE_XAUUSD            = _get("LEVERAGE_XAUUSD", 1)
 
 # ── Timeframes ─────────────────────────────────────────────────────────────────
 TIMEFRAME_MAIN     = "M1"
@@ -51,17 +53,15 @@ KELLY_RECALC_EVERY     = _get("KELLY_RECALC_EVERY", 20)
 KELLY_BOOTSTRAP_FRAC   = _get("KELLY_BOOTSTRAP_FRAC", 0.05)
 
 # ── ATR Multipliers ────────────────────────────────────────────────────────────
-ATR_SL_MULTIPLIER       = _get("ATR_SL_MULTIPLIER", 1.5)
-ATR_TP1_MULTIPLIER      = _get("ATR_TP1_MULTIPLIER", 2.0)
-ATR_TP2_MULTIPLIER      = _get("ATR_TP2_MULTIPLIER", 3.5)
-ATR_TRAILING_MULTIPLIER = _get("ATR_TRAILING_MULTIPLIER", 1.0)
-PARTIAL_TP_FRACTION     = _get("PARTIAL_TP_FRACTION", 0.5)
+ATR_SL_MULTIPLIER       = _get("ATR_SL_MULTIPLIER", 1.0)
+ATR_TP1_MULTIPLIER      = _get("ATR_TP1_MULTIPLIER", 1.2)
 
 # ── Risk Management ────────────────────────────────────────────────────────────
 MAX_DAILY_LOSS_PCT       = _get("MAX_DAILY_LOSS_PCT", 0.05)
 MAX_DRAWDOWN_PCT         = _get("MAX_DRAWDOWN_PCT", 0.15)
 MAX_CONSECUTIVE_LOSSES   = _get("MAX_CONSECUTIVE_LOSSES", 5)
 MIN_MARGIN_BUFFER        = _get("MIN_MARGIN_BUFFER", 2.0)
+MAX_SPREAD_USD           = _get("MAX_SPREAD_USD", 0.35)
 
 # ── ML Model ───────────────────────────────────────────────────────────────────
 SIGNAL_THRESHOLD          = _get("SIGNAL_THRESHOLD", 0.62)
