@@ -36,7 +36,6 @@ class TrainingLoop:
         self._objective      = objective_engine
         self._ollama         = ollama_advisor
 
-        self._threshold   = settings.SIGNAL_THRESHOLD
         self._sl_mult     = settings.ATR_SL_MULTIPLIER
         self._tp1_mult    = settings.ATR_TP1_MULTIPLIER
         self._best_metrics: Optional[dict] = None
@@ -49,11 +48,9 @@ class TrainingLoop:
         """
         Ejecuta el loop de entrenamiento iterativo.
 
-        Estrategia de ajuste por iteración:
-          iter 1-5:   ajuste fino de SIGNAL_THRESHOLD (+0.02 por iteración)
-          iter 6-10:  reduce ATR_SL (-0.1) para dar más espacio al precio
-          iter 11-15: aumenta ATR_TP1 (+0.1) para capturar más movimiento
-          iter 16-20: ajuste combinado más agresivo
+        Estrategia de ajuste (ver `_adjust_params`): con hold de 1 vela el
+        threshold ya no filtra señales, así que solo ATR_SL_MULTIPLIER y
+        ATR_TP1_MULTIPLIER se ajustan en cada iteración según WR/PF.
 
         Retorna: dict con métricas finales, modelo, y flag ready_for_live.
         """
@@ -98,7 +95,7 @@ class TrainingLoop:
 
         for iteration in range(1, max_iterations + 1):
             _log.info(f"\n--- Iteración {iteration}/{max_iterations} ---")
-            _log.info(f"  threshold={self._threshold:.3f} sl_mult={self._sl_mult:.2f} tp1_mult={self._tp1_mult:.2f}")
+            _log.info(f"  sl_mult={self._sl_mult:.2f} tp1_mult={self._tp1_mult:.2f}")
 
             # 3. Entrena — Ensemble si disponible, XGBoost fallback
             try:
@@ -144,7 +141,7 @@ class TrainingLoop:
                     df       = df_test,
                     model    = model,
                     feature_cols   = feature_cols,
-                    signal_threshold = self._threshold,
+                    signal_threshold = settings.SIGNAL_THRESHOLD,
                     initial_capital  = initial_capital,
                     regime_detector  = self._regime,
                 )
@@ -156,7 +153,7 @@ class TrainingLoop:
             n_trades = bt_metrics.get("total_trades", 0)
 
             if verbose:
-                display.print_training_progress(iteration, max_iterations, win_rate, pf, self._threshold)
+                display.print_training_progress(iteration, max_iterations, win_rate, pf, settings.SIGNAL_THRESHOLD)
 
             _log.info(f"  WR={win_rate:.1%} PF={pf:.2f} trades={n_trades}")
 
@@ -178,14 +175,14 @@ class TrainingLoop:
                 try:
                     suggestion = self._ollama.analyze_performance(
                         {"win_rate": win_rate, "profit_factor": pf, "trades": n_trades,
-                         "threshold": self._threshold}, self.symbol)
-                    if suggestion and suggestion.get("param") == "SIGNAL_THRESHOLD":
-                        adj = float(suggestion.get("amount", 0.02))
+                         "sl_mult": self._sl_mult, "tp1_mult": self._tp1_mult}, self.symbol)
+                    if suggestion and suggestion.get("param") == "ATR_SL_MULTIPLIER":
+                        adj = float(suggestion.get("amount", 0.1))
                         if suggestion.get("action") == "increase":
-                            self._threshold = min(0.75, self._threshold + adj)
+                            self._sl_mult = min(2.5, self._sl_mult + adj)
                         elif suggestion.get("action") == "decrease":
-                            self._threshold = max(0.55, self._threshold - adj)
-                        _log.info(f"  Ollama: {suggestion.get('reason', '')} → thr={self._threshold:.3f}")
+                            self._sl_mult = max(0.5, self._sl_mult - adj)
+                        _log.info(f"  Ollama: {suggestion.get('reason', '')} → sl_mult={self._sl_mult:.2f}")
                 except Exception:
                     pass
 
@@ -226,7 +223,7 @@ class TrainingLoop:
             "win_rate":     final_wr,
             "profit_factor": final_metrics.get("profit_factor", 0),
             "iteration":    best_iter,
-            "threshold":    self._threshold,
+            "threshold":    settings.SIGNAL_THRESHOLD,
         })
 
         return {
@@ -240,7 +237,7 @@ class TrainingLoop:
             "final_capital":   final_metrics.get("final_capital", initial_capital),
             "best_iteration":  best_iter,
             "iterations_run":  iteration,
-            "threshold_final": self._threshold,
+            "threshold_final": settings.SIGNAL_THRESHOLD,
             "model":           final_model,
             "equity_curve":    final_metrics.get("equity_curve", []),
             "reason":          "success" if ready else f"no_alcanzó_{settings.MIN_WIN_RATE_LIVE:.0%}",
@@ -250,60 +247,32 @@ class TrainingLoop:
 
     def _adjust_params(self, iteration: int, win_rate: float, profit_factor: float):
         """
-        Estrategia de ajuste progresivo para maximizar WR sin overfitting.
+        Ajusta SL/TP para converger al gate de WR — con hold de 1 vela, el
+        threshold ya no filtra señales, así que SL/TP son las únicas
+        palancas que cambian el resultado del backtest.
         """
-        deficit = settings.MIN_WIN_RATE_LIVE - win_rate
+        if win_rate < 0.50:
+            # Muchos stop-outs: da más espacio al SL y acorta el TP para
+            # asegurar ganancias chicas más seguido.
+            self._sl_mult  = min(2.0, self._sl_mult + 0.10)
+            self._tp1_mult = max(0.5, self._tp1_mult - 0.05)
+        elif win_rate < settings.MIN_WIN_RATE_LIVE:
+            self._sl_mult = min(1.8, self._sl_mult + 0.05)
+        elif profit_factor < 1.1:
+            # WR ya alcanza el gate pero el profit factor es débil: agranda el TP.
+            self._tp1_mult = min(2.0, self._tp1_mult + 0.10)
 
-        if iteration <= 5:
-            # Fase 1: ajustar threshold para filtrar señales débiles
-            if win_rate < 0.50:
-                self._threshold = min(0.75, self._threshold + 0.03)
-            elif win_rate < 0.55:
-                self._threshold = min(0.72, self._threshold + 0.02)
-            else:
-                self._threshold = min(0.70, self._threshold + 0.01)
-
-        elif iteration <= 10:
-            # Fase 2: dar más espacio al SL para reducir stop-outs prematuros
-            if profit_factor < 1.3:
-                self._sl_mult = min(2.5, self._sl_mult + 0.15)
-            # También ajusta threshold
-            if win_rate < 0.55:
-                self._threshold = min(0.72, self._threshold + 0.015)
-
-        elif iteration <= 15:
-            # Fase 3: aumentar TP para mejorar profit factor
-            if profit_factor < 1.5:
-                self._tp1_mult = min(3.0, self._tp1_mult + 0.1)
-            # Reducir threshold si ya filtramos demasiado
-            if win_rate < 0.50 and self._threshold > 0.65:
-                self._threshold = max(0.60, self._threshold - 0.01)
-
-        else:
-            # Fase 4: ajuste combinado agresivo
-            if win_rate < 0.50:
-                self._sl_mult     = min(2.8, self._sl_mult + 0.2)
-                self._threshold   = min(0.75, self._threshold + 0.02)
-                self._tp1_mult    = min(3.5, self._tp1_mult + 0.15)
-            elif win_rate < 0.55:
-                self._threshold   = min(0.73, self._threshold + 0.01)
-                self._sl_mult     = min(2.5, self._sl_mult + 0.1)
-
-        _log.debug(f"  Ajuste: threshold={self._threshold:.3f} "
-                   f"sl_mult={self._sl_mult:.2f} tp1_mult={self._tp1_mult:.2f}")
+        _log.debug(f"  Ajuste: sl_mult={self._sl_mult:.2f} tp1_mult={self._tp1_mult:.2f}")
 
     def _apply_temp_params(self):
         """Aplica parámetros temporales al settings module."""
-        self._orig_threshold = settings.SIGNAL_THRESHOLD
-        self._orig_sl        = settings.ATR_SL_MULTIPLIER
-        self._orig_tp1       = settings.ATR_TP1_MULTIPLIER
-        settings.SIGNAL_THRESHOLD   = self._threshold
+        self._orig_sl  = settings.ATR_SL_MULTIPLIER
+        self._orig_tp1 = settings.ATR_TP1_MULTIPLIER
         settings.ATR_SL_MULTIPLIER  = self._sl_mult
         settings.ATR_TP1_MULTIPLIER = self._tp1_mult
 
     def _restore_params(self):
         """Restaura parámetros originales."""
-        settings.SIGNAL_THRESHOLD   = self._orig_threshold
         settings.ATR_SL_MULTIPLIER  = self._orig_sl
         settings.ATR_TP1_MULTIPLIER = self._orig_tp1
 
@@ -313,12 +282,10 @@ class TrainingLoop:
         try:
             current = json.loads(path.read_text()) if path.exists() else {}
             current.update({
-                "SIGNAL_THRESHOLD":   round(self._threshold, 3),
                 "ATR_SL_MULTIPLIER":  round(self._sl_mult, 2),
                 "ATR_TP1_MULTIPLIER": round(self._tp1_mult, 2),
             })
             path.write_text(json.dumps(current, indent=2))
-            _log.info(f"Parámetros optimizados guardados: thr={self._threshold:.3f} "
-                      f"sl={self._sl_mult:.2f} tp1={self._tp1_mult:.2f}")
+            _log.info(f"Parámetros optimizados guardados: sl={self._sl_mult:.2f} tp1={self._tp1_mult:.2f}")
         except Exception as e:
             _log.warning(f"No se pudo guardar runtime_params: {e}")
