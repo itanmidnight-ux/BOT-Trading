@@ -1,4 +1,4 @@
-# BOT-Trading v4.1 — MT5/FBS Scalping Bot
+# BOT-Trading v4.1 — MT5/FBS Scalping Bot (Linux)
 
 Bot de trading algorítmico para MetaTrader 5 con broker FBS. Usa Ensemble ML, Kelly Criterion y un LLM local (Ollama) para auto-mejora autónoma.
 
@@ -44,49 +44,11 @@ MT5 → data_downloader → feature_engine → ensemble_model
 
 ## Requisitos
 
-- **Windows 10/11 (64-bit) o Linux** (cualquier distro con Python 3.8+)
+- **Linux** (cualquier distro con Python 3.8+)
 - **Python 3.10+** — [python.org](https://www.python.org/downloads/)
-- **MetaTrader 5** — [descargar aquí](https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe) (en Linux se instala dentro de Wine, ver más abajo)
+- **MetaTrader 5** — [descargar aquí](https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe) (se instala dentro de Wine, ver más abajo)
 - **Cuenta demo FBS** — [fbs.com](https://fbs.com)
 - **Ollama** (opcional, para LLM) — [ollama.ai](https://ollama.ai)
-
----
-
-## Instalación — Windows
-
-### 1. Clonar el repositorio
-
-```bat
-git clone https://github.com/itanmidnight-ux/BOT-Trading.git
-cd BOT-Trading
-```
-
-### 2. Instalar todo automáticamente
-
-```bat
-install.bat
-```
-
-Esto instala: virtualenv Python, dependencias, verifica MT5, descarga modelo Ollama (phi3:mini).
-
-### 3. Instalar la librería MetaTrader5
-
-```bat
-.venv\Scripts\activate
-pip install MetaTrader5
-```
-
-### 4. Configurar credenciales
-
-Edita el archivo `.env`:
-
-```env
-TRADING_MODE=demo
-MT5_EXE=C:\Program Files\MetaTrader 5\terminal64.exe
-MT5_LOGIN=TU_LOGIN
-MT5_PASSWORD=TU_PASSWORD
-MT5_SERVER=FBS-Demo
-```
 
 ---
 
@@ -169,21 +131,14 @@ MT5_BRIDGE_PORT=8001
 
 ### Modo TEST (sin MT5, sin cuenta real)
 
-Entrena el modelo con datos de yfinance y hace backtest. **No necesita MT5 ni Wine instalados** — funciona igual en Windows y Linux.
+Entrena el modelo con datos de yfinance y hace backtest. **No necesita MT5 ni Wine instalados.**
 
-```bat
-run_test.bat
-```
 ```bash
 ./run_test.sh
 ```
 
 o desde terminal:
 
-```bat
-.venv\Scripts\activate
-python main.py --test
-```
 ```bash
 source .venv/bin/activate
 python main.py --test
@@ -191,11 +146,6 @@ python main.py --test
 
 ### Modo BACKTEST (con datos MT5 locales)
 
-```bat
-.venv\Scripts\activate
-python main.py
-# Seleccionar opción 3
-```
 ```bash
 source .venv/bin/activate
 python main.py
@@ -204,19 +154,6 @@ python main.py
 
 ### Modo DEMO (trading real con cuenta demo)
 
-**Windows:**
-1. Abre MetaTrader 5
-2. Inicia sesión en tu cuenta FBS Demo
-3. Deja MT5 abierto en segundo plano
-4. Ejecuta:
-
-```bat
-.venv\Scripts\activate
-python main.py
-# Seleccionar opción 1
-```
-
-**Linux:**
 1. Levanta Xvfb, el terminal MT5 bajo Wine y el puente `mt5linux` (ver arriba)
 2. Inicia sesión en tu cuenta FBS Demo dentro del terminal (bajo Wine)
 3. Ejecuta:
@@ -277,12 +214,9 @@ LLM evalúa resultado → Genera objetivo siguiente
 ```
 BOT-Trading/
 ├── main.py                 # Punto de entrada
-├── install.bat             # Instalador Windows
-├── install.sh              # Instalador Linux
-├── run_test.bat            # Modo test sin MT5 (Windows)
-├── run_test.sh             # Modo test sin MT5 (Linux)
-├── start_training.bat      # Entrenamiento offline (Windows)
-├── start_training.sh       # Entrenamiento offline (Linux)
+├── install.sh              # Instalador
+├── run_test.sh             # Modo test sin MT5
+├── start_training.sh       # Entrenamiento offline
 ├── requirements.txt
 ├── .env                    # Credenciales (NO subir a git)
 ├── config/
@@ -290,7 +224,7 @@ BOT-Trading/
 │   ├── constants.py        # Constantes del sistema
 │   └── .env.example        # Plantilla de configuración
 ├── core/                   # Módulos del bot (12 en pipeline)
-│   └── mt5_compat.py       # Shim multiplataforma (MetaTrader5 nativo / mt5linux)
+│   └── mt5_compat.py       # Shim MetaTrader5 nativo / mt5linux (bridge Wine)
 ├── analysis/               # Reportes y optimización
 ├── utils/                  # Logger, display, notifier
 ├── tests/                  # 40 tests automatizados
@@ -303,10 +237,6 @@ BOT-Trading/
 
 ## Tests
 
-```bat
-.venv\Scripts\activate
-python -m pytest tests/ -v
-```
 ```bash
 source .venv/bin/activate
 python -m pytest tests/ -v

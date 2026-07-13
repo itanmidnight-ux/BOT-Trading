@@ -5,17 +5,15 @@ Manages the connection lifecycle with a MetaTrader 5 terminal.
 Design notes:
 - initialize() first tries mt5.initialize() against the already-running terminal.
 - If that fails it spawns the terminal directly and polls for up to 30 s:
-    * Windows  -> launches terminal64.exe natively.
-    * Linux/Mac -> the terminal only exists as a Windows binary, so it is
-      launched via `wine terminal64.exe` inside WINEPREFIX, using the
-      virtual DISPLAY configured in .env (typically an Xvfb display).
+    the terminal only exists as a Windows binary, so it is launched via
+    `wine terminal64.exe` inside WINEPREFIX, using the virtual DISPLAY
+    configured in .env (typically an Xvfb display).
 - mt5.login() called only when no active session found.
 - Exponential back-off: attempts at 0 s, 2 s, 6 s (3 attempts total).
 - Every public method guards against a missing terminal with is_connected().
 """
 
 import os
-import platform
 import subprocess
 import time
 from pathlib import Path
@@ -33,8 +31,6 @@ load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
 log = get_logger("mt5_connector")
 
-_IS_WINDOWS = platform.system() == "Windows"
-
 # Retry policy
 _MAX_ATTEMPTS = 3
 _BACKOFF_SECONDS = [0, 2, 6]          # sleep before attempt 0, 1, 2
@@ -48,18 +44,7 @@ _LAUNCH_TIMEOUT = 30.0                 # max seconds to wait after spawning
 # ---------------------------------------------------------------------------
 
 def _default_mt5_exe() -> str:
-    """Return the default MT5 terminal path for the current platform."""
-    if _IS_WINDOWS:
-        import winreg
-        try:
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                                 r"SOFTWARE\MetaQuotes\MetaTrader 5")
-            path, _ = winreg.QueryValueEx(key, "Path")
-            return str(Path(path) / "terminal64.exe")
-        except Exception:
-            return r"C:\Program Files\MetaTrader 5\terminal64.exe"
-
-    # Linux/Mac: terminal64.exe runs under Wine, inside WINEPREFIX.
+    """Return the default MT5 terminal path (terminal64.exe under Wine)."""
     wineprefix = os.environ.get("WINEPREFIX", str(Path.home() / ".wine_mt5"))
     return str(Path(wineprefix) / "drive_c" / "Program Files" / "MetaTrader 5" / "terminal64.exe")
 
@@ -115,13 +100,13 @@ class MT5Connector:
         return False
 
     def _spawn_terminal(self) -> Optional[subprocess.Popen]:
-        """Launch the MT5 terminal (natively on Windows, via Wine elsewhere)."""
+        """Launch the MT5 terminal via Wine."""
         mt5_exe = os.environ.get("MT5_EXE", "") or _default_mt5_exe()
         if not Path(mt5_exe).exists():
             log.warning("MT5_EXE not found: %s", mt5_exe)
             return None
 
-        cmd = [mt5_exe] if _IS_WINDOWS else ["wine", mt5_exe]
+        cmd = ["wine", mt5_exe]
         log.info("Launching MT5 terminal: %s", " ".join(cmd))
         try:
             proc = subprocess.Popen(
