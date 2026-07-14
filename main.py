@@ -164,7 +164,6 @@ def run_live(symbol: str, mode: str):
     from core.signal_generator import SignalGenerator
     from core.kelly import KellyEngine
     from core.risk_manager import RiskManager
-    from core.capital_scaler import CapitalScaler
     from core.trade_manager import TradeManager
     from core.exit_manager import ExitManager
     from core.state_manager import StateManager
@@ -227,7 +226,6 @@ def run_live(symbol: str, mode: str):
     exit_mgr    = ExitManager()
     kelly       = KellyEngine(symbol)
     risk        = RiskManager(equity)
-    scaler      = CapitalScaler()
     data_upd    = DataUpdater([symbol], settings.ALL_TIMEFRAMES)
     improver    = AutoImprover()
     stream      = MT5Stream()
@@ -239,7 +237,7 @@ def run_live(symbol: str, mode: str):
         feature_engine=fe, model_updater=model_upd, regime_detector=regime,
         mtf_analyzer=mtf, signal_generator=signal_gen, kelly_engine=kelly,
         risk_manager=risk, trade_manager=trade_mgr, exit_manager=exit_mgr,
-        state_manager=state, data_updater=data_upd, capital_scaler=scaler,
+        state_manager=state, data_updater=data_upd,
         auto_improver=improver,
     )
 
@@ -258,7 +256,7 @@ def run_live(symbol: str, mode: str):
 
     # ── Fase 4: Live trading ──────────────────────────────────────────────────
     print(f"\n[4/4] Iniciando trading en vivo — {mode.upper()} — {symbol}")
-    print(f"  Balance: ${equity:.2f} | Fase: {scaler.get_phase(equity)} | WR modelo: {result['win_rate']:.1%}")
+    print(f"  Balance: ${equity:.2f} | WR modelo: {result['win_rate']:.1%}")
     live.start()
 
 
@@ -266,7 +264,7 @@ def run_log_analysis():
     """Analiza todos los logs y muestra resumen."""
     from analysis.log_analyzer import LogAnalyzer
     analyzer = LogAnalyzer()
-    for symbol in [settings.SYMBOL_PHASE1, settings.SYMBOL_PHASE2]:
+    for symbol in [settings.SYMBOL]:
         result = analyzer.analyze(symbol)
         if result.get("summary"):
             s = result["summary"]
@@ -314,7 +312,7 @@ def main():
         print("\n  [TEST MODE] Sin MT5 — backtest + LLM con datos yfinance\n")
         if not _check_prerequisites(require_mt5=False):
             sys.exit(1)
-        run_backtest_only(settings.SYMBOL_PHASE1)
+        run_backtest_only(settings.SYMBOL)
         return
 
     if not _check_prerequisites(require_mt5=True):
@@ -327,20 +325,20 @@ def main():
         if choice == "1":
             print("\n  [DEMO] Modo demo (cuenta demo FBS)")
             if _connect_mt5("demo"):
-                run_live(settings.SYMBOL_PHASE1, "demo")
+                run_live(settings.SYMBOL, "demo")
 
         elif choice == "2":
             print("\n  [REAL] Modo real — DINERO REAL")
             confirm = input("  Escribe CONFIRMO para continuar: ").strip().upper()
             if confirm == "CONFIRMO":
                 if _connect_mt5("real"):
-                    run_live(settings.SYMBOL_PHASE1, "real")
+                    run_live(settings.SYMBOL, "real")
             else:
                 print("  Cancelado.")
 
         elif choice == "3":
             print("\n  [BACKTEST] Modo backtest sin conexión live")
-            run_backtest_only(settings.SYMBOL_PHASE1)
+            run_backtest_only(settings.SYMBOL)
 
         elif choice == "4":
             print("\n  [ANÁLISIS] Analizando logs...")
@@ -348,7 +346,7 @@ def main():
 
         elif choice == "5":
             print("\n  [OPTIMIZAR] Optimizando parámetros...")
-            run_optimize(settings.SYMBOL_PHASE1)
+            run_optimize(settings.SYMBOL)
 
         elif choice == "6":
             print("\n  Hasta pronto.\n")
