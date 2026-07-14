@@ -179,7 +179,7 @@ class TestBacktester:
         fe   = FeatureEngine()
         df   = _make_ohlcv(500)
         df_f = fe.compute(df)
-        df_f = fe.add_target(df_f, "EURUSD")
+        df_f = fe.add_target(df_f, "XAUUSD")
         df_f = df_f.dropna().reset_index(drop=True)
 
         feature_cols = fe.get_feature_cols()
@@ -188,7 +188,7 @@ class TestBacktester:
         mock_model = MagicMock()
         mock_model.predict_proba.return_value = np.array([[0.3, 0.7]])
 
-        bt      = Backtester("EURUSD")
+        bt      = Backtester("XAUUSD")
         metrics = bt.run(df_f, mock_model, feature_cols, 0.62, 20.0)
 
         assert "win_rate"      in metrics
