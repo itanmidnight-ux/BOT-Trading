@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-BOT-Trading v4.1 — MetaTrader 5 / FBS (Windows / Linux)
+BOT-Trading v4.1 — MetaTrader 5 / FBS (Linux)
 Punto de entrada principal.
 Uso:
   python main.py           -> menu interactivo
   python main.py --test    -> backtest/entrenamiento sin MT5 (modo test)
 """
 import os
-import platform
 import sys
 from pathlib import Path
 
@@ -30,9 +29,8 @@ from config import settings, constants
 
 _log = get_logger("main")
 
-_IS_WINDOWS = platform.system() == "Windows"
-_INSTALL_SCRIPT = "install.bat" if _IS_WINDOWS else "install.sh"
-_VENV_ACTIVATE = r".venv\Scripts\activate" if _IS_WINDOWS else "source .venv/bin/activate"
+_INSTALL_SCRIPT = "install.sh"
+_VENV_ACTIVATE = "source .venv/bin/activate"
 
 
 def _check_prerequisites(require_mt5: bool = True) -> bool:
@@ -49,11 +47,8 @@ def _check_prerequisites(require_mt5: bool = True) -> bool:
         except Exception:
             print("\n[ERROR] MetaTrader5 no disponible.")
             print(f"  Activa venv: {_VENV_ACTIVATE}")
-            if _IS_WINDOWS:
-                print("  Luego: pip install MetaTrader5\n")
-            else:
-                print("  Luego: pip install mt5linux")
-                print("  Y verifica que el bridge Wine (README) esté corriendo.\n")
+            print("  Luego: pip install mt5linux")
+            print("  Y verifica que el bridge Wine (README) esté corriendo.\n")
             return False
     return True
 
