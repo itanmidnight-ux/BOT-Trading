@@ -14,7 +14,7 @@ def notify(event_type: str, data: dict):
     if event_type == TRADE_OPEN:
         msg = (f"[>>>] {data['symbol']} {data['direction']} "
                f"{data['lots']:.2f}lots @ {data['entry']:.5f} | "
-               f"SL:{data['sl']:.5f} TP1:{data['tp1']:.5f}")
+               f"SL:{data['sl']:.5f} TP:{data['tp']:.5f}")
         print(f"\n{msg}")
         _log.info(msg)
 
