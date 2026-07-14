@@ -123,6 +123,7 @@ class ModelTrainer:
             eval_set=[(X_val, y_val)],
             verbose=False,
         )
+        self.last_model = model
 
         best_iter = getattr(model, "best_iteration", params.get("n_estimators", 600))
         logger.info("[%s] Mejor iteración (early stopping): %d", symbol, best_iter)
