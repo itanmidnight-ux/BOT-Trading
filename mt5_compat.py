@@ -20,15 +20,44 @@ logger = logging.getLogger(__name__)
 _mt5 = None
 BACKEND = None
 
+
+class _LazyMT5Linux:
+    """Proxy perezoso sobre el cliente mt5linux.
+
+    El cliente real abre la conexion TCP al servidor (que corre en el Python
+    de Wine) en su constructor. Instanciarlo al importar este modulo hacia
+    imposible siquiera importar el codebase (o correr los tests) sin ese
+    servidor levantado; por eso la conexion se difiere al primer uso real."""
+
+    def __init__(self, host: str, port: int):
+        self._client = None
+        self._host = host
+        self._port = port
+
+    def __getattr__(self, name):
+        if self._client is None:
+            from mt5linux import MetaTrader5 as _MT5LinuxClient  # type: ignore
+            try:
+                self._client = _MT5LinuxClient(host=self._host, port=self._port)
+            except Exception as e:
+                raise RuntimeError(
+                    f"No se pudo conectar al servidor mt5linux en {self._host}:{self._port} ({e}). "
+                    "Levanta el servidor dentro del Python de Wine antes de operar: "
+                    "wine python -m mt5linux <ruta_python_wine> (ver README.md)."
+                ) from e
+        return getattr(self._client, name)
+
+
 try:
     import MetaTrader5 as _mt5  # type: ignore
     BACKEND = "native"
 except ImportError:
     try:
-        from mt5linux import MetaTrader5 as _MT5LinuxClient  # type: ignore
-        _host = os.getenv("MT5_BRIDGE_HOST", "localhost")
-        _port = int(os.getenv("MT5_BRIDGE_PORT", "18812"))
-        _mt5 = _MT5LinuxClient(host=_host, port=_port)
+        import mt5linux  # noqa: F401  (solo se verifica que el paquete exista)
+        _mt5 = _LazyMT5Linux(
+            host=os.getenv("MT5_BRIDGE_HOST", "localhost"),
+            port=int(os.getenv("MT5_BRIDGE_PORT", "18812")),
+        )
         BACKEND = "mt5linux"
     except ImportError:
         _mt5 = None

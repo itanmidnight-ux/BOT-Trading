@@ -62,7 +62,19 @@ class TradingBot:
         self.recent_trade_pnls: list = []
 
     def start(self) -> None:
-        self.connector.connect()
+        try:
+            self.connector.connect()
+        except Exception as e:
+            logger.error(
+                "No se pudo conectar a MetaTrader 5: %s\n"
+                "  - Verifica que el terminal MT5 este corriendo y logueado.\n"
+                "  - En Linux nativo: levanta el servidor mt5linux dentro del Python de Wine\n"
+                "    y configura MT5_BRIDGE_HOST/MT5_BRIDGE_PORT en .env (ver README.md).\n"
+                "  - Revisa MT5_LOGIN/MT5_PASSWORD/MT5_SERVER en .env si usas login explicito.",
+                e,
+            )
+            raise SystemExit(1)
+
         logger.info("Bot iniciado | symbol=%s timeframe=%s DRY_RUN=%s USE_EA_BRIDGE=%s",
                     config.SYMBOL, config.TIMEFRAME, config.DRY_RUN, config.USE_EA_BRIDGE)
         while True:

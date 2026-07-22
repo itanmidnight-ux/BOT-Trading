@@ -91,31 +91,36 @@ configurable), validacion de spread, y verificacion de RR minimo antes de
 considerar el plan valido. Ver el docstring del modulo para el detalle
 matematico completo.
 
-## Instalacion
+## Instalacion (Linux)
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # completar credenciales
+./install.sh
 ```
 
-En Linux, si el terminal MT5 corre bajo Wine, levanta el servidor `mt5linux`
-con el Python de Wine y configura `MT5_BRIDGE_HOST`/`MT5_BRIDGE_PORT` en
-`.env`; `mt5_compat.py` detecta automaticamente ese backend.
+El script crea el entorno virtual, instala todas las dependencias, genera tu
+`.env` privado desde la plantilla (con permisos `600`, y **nunca se
+commitea**: esta en `.gitignore`) y verifica la instalacion corriendo la
+suite completa de tests. Luego edita `.env` con tus credenciales.
+
+En Linux el terminal MT5 corre bajo Wine: instala Wine + MT5, instala
+`mt5linux` en el Python de Wine y levanta su servidor
+(`wine python -m mt5linux <ruta_al_python_de_wine>`); configura
+`MT5_BRIDGE_HOST`/`MT5_BRIDGE_PORT` en `.env`. `mt5_compat.py` detecta
+automaticamente ese backend (la conexion es perezosa: los tests y el
+backtester funcionan sin el servidor levantado).
 
 ## Uso
 
 ```bash
-# Validar logica sin enviar ordenes reales (default DRY_RUN=True)
-python main.py
-
-# Backtest con tus propios datos historicos (CSV: time,open,high,low,close,tick_volume)
-python backtester.py ruta/a/tus_datos_xauusd_m1.csv
-
-# Tests unitarios (no requieren MT5 ni conexion de red)
-pytest tests/ -v
+./run.sh                  # lanza el bot (DRY_RUN=True por defecto: sin ordenes reales)
+./run.sh --check          # muestra la configuracion efectiva sin lanzar nada
+./run.sh --test           # corre la suite de tests
+./run.sh --backtest f.csv # backtest con tus datos M1 (time,open,high,low,close,tick_volume)
 ```
+
+`run.sh` instala automaticamente si falta el entorno, asegura el `.env`, y
+si `DRY_RUN=False` te avisa y da 5 segundos para abortar antes de operar en
+real.
 
 ### Habilitar ordenes reales
 1. Corre en demo con `DRY_RUN=True` primero y revisa `logs/` (señales,
