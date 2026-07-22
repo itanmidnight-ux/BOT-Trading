@@ -18,8 +18,11 @@ IMPORTANTE (leer antes de confiar en cualquier resultado):
     simultaneas reales via MT5. Esto mantiene el motor tratable sin inflar
     artificialmente las metricas con posiciones paralelas correlacionadas.
   - El relleno de ordenes usa el `open` de la vela SIGUIENTE a la señal (evita
-    look-ahead bias), y SL/TP intrabar se evaluan contra el high/low de cada
-    vela subsiguiente (aproximacion OHLC, no simulacion a nivel de tick).
+    look-ahead bias), el SL se evalua contra el high/low de cada vela INCLUIDA
+    la de entrada (aproximacion OHLC, no simulacion a nivel de tick), y cada
+    porcion de volumen cerrada descuenta el costo del spread configurado.
+    Comisiones y swap del broker NO estan modelados: agrega tu comision por
+    lote al interpretar los resultados si tu cuenta la cobra.
 """
 import logging
 from dataclasses import dataclass, field
@@ -137,11 +140,27 @@ def run_backtest(df: pd.DataFrame, initial_balance: float = 1000.0,
     risk_mgr = risk_management.RiskManager()
 
     atr_full = atr_indicator(df, config.ATR_PERIOD)
+    # Costo de spread por unidad de precio: las velas MT5 son precios bid, asi
+    # que un BUY entra spread por encima y un SELL sale (recompra) spread por
+    # encima. Se descuenta una vez por cada porcion de volumen cerrada.
+    spread_price = spread_points * symbol_info.point
+
+    def _chunk_pnl(direction: int, entry: float, exit_: float, volume: float) -> float:
+        gross = (exit_ - entry) * direction * volume * symbol_info.trade_contract_size
+        spread_cost = spread_price * volume * symbol_info.trade_contract_size
+        return gross - spread_cost
+
+    def _close_chunk(entry_time, exit_time, direction: int, entry: float, exit_: float,
+                      volume: float, reason: str) -> float:
+        pnl = _chunk_pnl(direction, entry, exit_, volume)
+        trades.append(BacktestTrade(entry_time, exit_time, direction, entry, exit_, volume, pnl, reason))
+        return pnl
 
     i = min_window
     while i < len(df) - 1:
         window = df.iloc[max(0, i - config.BARS_LOOKBACK): i + 1]
         bar_next = df.iloc[i + 1]
+        bar_time = bar_next.get("time", i + 1)
         current_atr = atr_full.iloc[i]
 
         if position is None:
@@ -160,7 +179,7 @@ def run_backtest(df: pd.DataFrame, initial_balance: float = 1000.0,
                             position = {
                                 "direction": int(result.direction),
                                 "entry_price": entry_price,
-                                "entry_time": bar_next.get("time", i + 1),
+                                "entry_time": bar_time,
                                 "volume": volume,
                                 "initial_volume": volume,
                                 "sl": plan.sl_price,
@@ -170,19 +189,20 @@ def run_backtest(df: pd.DataFrame, initial_balance: float = 1000.0,
                             pm.register_position(0, entry_price, position["direction"], volume,
                                                   plan.tp1_price, plan.tp2_price)
                             risk_mgr.register_trade_opened()
+                            # NO se hace `continue`: la propia vela de entrada
+                            # puede tocar el SL (gap/mecha) y debe evaluarse ya.
+
+        if position is None:
             i += 1
             continue
 
-        # --- Gestionar posicion abierta contra la vela siguiente ---------
+        # --- Gestionar posicion abierta contra la vela actual -------------
         direction = position["direction"]
         hit_sl = (bar_next["low"] <= position["sl"]) if direction == 1 else (bar_next["high"] >= position["sl"])
 
         if hit_sl:
-            exit_price = position["sl"]
-            pnl = (exit_price - position["entry_price"]) * direction * position["volume"] * symbol_info.trade_contract_size
-            balance += pnl
-            trades.append(BacktestTrade(position["entry_time"], bar_next.get("time", i + 1), direction,
-                                         position["entry_price"], exit_price, position["volume"], pnl, "stop loss"))
+            balance += _close_chunk(position["entry_time"], bar_time, direction,
+                                     position["entry_price"], position["sl"], position["volume"], "stop loss")
             pm.forget_position(0)
             position = None
             equity_curve.append(balance)
@@ -195,18 +215,14 @@ def run_backtest(df: pd.DataFrame, initial_balance: float = 1000.0,
         for action in actions:
             if action.type == profit_manager_module.ActionType.PARTIAL_CLOSE:
                 vol = min(action.volume, position["volume"])
-                pnl = (current_price - position["entry_price"]) * direction * vol * symbol_info.trade_contract_size
-                balance += pnl
+                balance += _close_chunk(position["entry_time"], bar_time, direction,
+                                         position["entry_price"], current_price, vol, action.reason)
                 position["volume"] = round(position["volume"] - vol, 2)
-                trades.append(BacktestTrade(position["entry_time"], bar_next.get("time", i + 1), direction,
-                                             position["entry_price"], current_price, vol, pnl, action.reason))
             elif action.type == profit_manager_module.ActionType.MODIFY_SL:
                 position["sl"] = action.sl_price
             elif action.type == profit_manager_module.ActionType.FULL_CLOSE:
-                pnl = (current_price - position["entry_price"]) * direction * position["volume"] * symbol_info.trade_contract_size
-                balance += pnl
-                trades.append(BacktestTrade(position["entry_time"], bar_next.get("time", i + 1), direction,
-                                             position["entry_price"], current_price, position["volume"], pnl, action.reason))
+                balance += _close_chunk(position["entry_time"], bar_time, direction,
+                                         position["entry_price"], current_price, position["volume"], action.reason)
                 position = None
 
         if position is not None and position["volume"] <= 0:

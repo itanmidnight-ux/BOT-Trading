@@ -87,8 +87,8 @@ class TradingBot:
         positions = self.connector.get_open_positions()
         current_tickets = {p.ticket for p in positions}
 
-        self._reconcile_closed_positions(current_tickets)
-        self._manage_open_positions(positions, current_atr)
+        self._reconcile_closed_positions(current_tickets, positions)
+        self._manage_open_positions(positions, current_atr, symbol_info)
 
         can_trade, reason = self.risk_manager.can_open_new_trade(capital_state.equity, len(positions))
         if can_trade:
@@ -102,14 +102,21 @@ class TradingBot:
         self.known_tickets = current_tickets
 
     # ------------------------------------------------------------------
-    def _reconcile_closed_positions(self, current_tickets: set) -> None:
+    def _reconcile_closed_positions(self, current_tickets: set, positions) -> None:
         closed = self.known_tickets - current_tickets
+        positions_by_ticket = {p.ticket: p for p in positions}
         for ticket in closed:
             pnl = self.connector.get_position_realized_pnl(ticket)
             self.recent_trade_pnls.append(pnl)
             self.closed_trades_count += 1
             self.profit_manager.forget_position(ticket)
-            self.grid_sessions.pop(ticket, None)
+
+            # Si la posicion base de un grid cerro (SL/TP/manual), los niveles
+            # hijos ya abiertos no deben quedar huerfanos: se cierra la canasta.
+            grid_session = self.grid_sessions.pop(ticket, None)
+            if grid_session is not None:
+                self._close_grid_children(grid_session, positions_by_ticket, "base del grid cerrada")
+
             _log_trade_row({
                 "ticket": ticket, "pnl": round(pnl, 2),
                 "closed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -139,20 +146,38 @@ class TradingBot:
             logger.info("ai_optimizer sugiere (NO aplicado automaticamente, revisar logs/ai_suggested_params.json): %s",
                         suggestions)
 
+    def _close_grid_children(self, grid_session, positions_by_ticket: dict, reason: str) -> None:
+        for child_ticket in grid_session.opened_level_tickets():
+            child_pos = positions_by_ticket.get(child_ticket)
+            if child_pos is None:
+                continue  # ya cerrada (p.ej. por su propio SL de basket stop)
+            self.connector.close_position(child_pos, comment=reason[:31])
+            self.profit_manager.forget_position(child_ticket)
+            logger.info("Nivel de grid cerrado ticket=%d motivo=%s", child_ticket, reason)
+
     # ------------------------------------------------------------------
-    def _manage_open_positions(self, positions, current_atr: float) -> None:
+    def _manage_open_positions(self, positions, current_atr: float, symbol_info) -> None:
+        # Los modify de trailing deben respetar la distancia minima del broker.
+        min_stop_distance = symbol_info.trade_stops_level * symbol_info.point
+        positions_by_ticket = {p.ticket: p for p in positions}
+
         for pos in positions:
-            if pos.ticket not in self.known_tickets:
+            # Solo se sincroniza como "externa" una posicion que este proceso no
+            # tiene registrada. Comparar contra known_tickets (el estado del ciclo
+            # anterior) pisaba con TPs estimados los trades recien abiertos por
+            # el propio bot.
+            if not self.profit_manager.has_position(pos.ticket):
                 self._sync_external_position(pos, current_atr)
 
             current_price = pos.price_current
-            actions = self.profit_manager.evaluate(pos.ticket, current_price, pos.sl, current_atr)
+            actions = self.profit_manager.evaluate(pos.ticket, current_price, pos.sl, current_atr,
+                                                    min_stop_distance=min_stop_distance)
             for action in actions:
-                self._apply_profit_action(pos, action)
+                self._apply_profit_action(pos, action, positions_by_ticket)
 
             grid_session = self.grid_sessions.get(pos.ticket)
             if grid_session is not None:
-                self._check_grid_trigger(pos, grid_session, current_price)
+                self._check_grid_trigger(pos, grid_session, current_price, positions_by_ticket)
 
     def _sync_external_position(self, pos, current_atr: float) -> None:
         """Registra en profit_manager una posicion que el proceso no origino
@@ -166,7 +191,7 @@ class TradingBot:
         logger.info("Posicion externa sincronizada: ticket=%d direccion=%d volumen=%.2f",
                     pos.ticket, direction, pos.volume)
 
-    def _apply_profit_action(self, pos, action) -> None:
+    def _apply_profit_action(self, pos, action, positions_by_ticket: dict) -> None:
         if action.type == profit_manager_module.ActionType.PARTIAL_CLOSE:
             self.connector.close_position(pos, volume=action.volume, comment=action.reason[:31])
             logger.info("Cierre parcial ticket=%d vol=%.2f motivo=%s", pos.ticket, action.volume, action.reason)
@@ -175,14 +200,17 @@ class TradingBot:
         elif action.type == profit_manager_module.ActionType.FULL_CLOSE:
             self.connector.close_position(pos, comment=action.reason[:31])
             logger.info("Cierre total ticket=%d motivo=%s", pos.ticket, action.reason)
-            self.grid_sessions.pop(pos.ticket, None)
+            grid_session = self.grid_sessions.pop(pos.ticket, None)
+            if grid_session is not None:
+                self._close_grid_children(grid_session, positions_by_ticket, "cierre de base en max ganancia")
 
-    def _check_grid_trigger(self, pos, grid_session, current_price: float) -> None:
+    def _check_grid_trigger(self, pos, grid_session, current_price: float, positions_by_ticket: dict) -> None:
         if grid_session.basket_stop_hit(current_price):
             self.connector.close_position(pos, comment="grid basket stop")
             self.profit_manager.forget_position(pos.ticket)
             self.grid_sessions.pop(pos.ticket, None)
-            logger.info("Grid basket stop alcanzado, cerrando ticket=%d", pos.ticket)
+            self._close_grid_children(grid_session, positions_by_ticket, "grid basket stop")
+            logger.info("Grid basket stop alcanzado, cerrando canasta base=%d", pos.ticket)
             return
 
         level = grid_session.next_pending_level(current_price)
@@ -194,8 +222,8 @@ class TradingBot:
             comment=f"grid_lvl_{level.index}",
         )
         opened_ticket = getattr(result, "order", None) if result is not None else None
-        if opened_ticket or config.DRY_RUN:
-            grid_session.mark_opened(level.index, opened_ticket or -1)
+        if opened_ticket is not None:
+            grid_session.mark_opened(level.index, opened_ticket)
             logger.info("Nivel de grid %d abierto (vol=%.2f) para base ticket=%d", level.index, level.volume, pos.ticket)
 
     # ------------------------------------------------------------------
@@ -223,16 +251,27 @@ class TradingBot:
             return
 
         comment = "+".join(s.strategy_name for s in result.agreeing)[:31]
+
+        if config.DRY_RUN:
+            # DRY_RUN valida el pipeline completo señal->plan->sizing y lo
+            # loguea, pero no registra seguimiento: la posicion no existe en el
+            # broker, asi que trackearla solo acumularia estado fantasma.
+            # Para simular la gestion completa del trade esta backtester.py.
+            self.risk_manager.register_trade_opened()
+            logger.info("[DRY_RUN] Señal ejecutable dir=%s vol=%.2f entry=%.5f sl=%.5f tp1=%.5f tp2=%.5f rr=%.2f confluencia=%s",
+                        result.direction.name, volume, plan.entry_price, plan.sl_price, plan.tp1_price,
+                        plan.tp2_price, plan.risk_reward_ratio, comment)
+            return
+
         order_result = self.connector.send_market_order(int(result.direction), volume, plan.sl_price, plan.tp1_price, comment=comment)
         ticket = getattr(order_result, "order", None) if order_result is not None else None
 
-        if ticket is None and not config.DRY_RUN:
+        if ticket is None:
             logger.warning("Orden no confirmada por el broker, no se registra seguimiento")
             return
 
-        effective_ticket = ticket if ticket is not None else -1  # DRY_RUN: ticket simulado
         self.risk_manager.register_trade_opened()
-        self.profit_manager.register_position(effective_ticket, plan.entry_price, int(result.direction),
+        self.profit_manager.register_position(ticket, plan.entry_price, int(result.direction),
                                                volume, plan.tp1_price, plan.tp2_price)
 
         if config.GRID_ENABLED:
@@ -241,7 +280,7 @@ class TradingBot:
                 plan.sl_distance_price, symbol_info, capital_state.equity,
             )
             if grid_session.levels:
-                self.grid_sessions[effective_ticket] = grid_session
+                self.grid_sessions[ticket] = grid_session
 
         logger.info("Trade abierto dir=%s vol=%.2f entry=%.5f sl=%.5f tp1=%.5f tp2=%.5f rr=%.2f confluencia=%s",
                     result.direction.name, volume, plan.entry_price, plan.sl_price, plan.tp1_price,

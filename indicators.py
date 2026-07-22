@@ -59,12 +59,11 @@ def vwap(df: pd.DataFrame, session_reset_hour_utc: int = 0) -> pd.Series:
     volume = df["tick_volume"].replace(0, 1)  # evita division por cero en velas sin volumen reportado
 
     if "time" in df.columns:
-        ts = pd.to_datetime(df["time"], utc=True)
+        shifted = pd.to_datetime(df["time"], utc=True) - pd.Timedelta(hours=session_reset_hour_utc)
+        session_id = pd.Series(shifted.dt.date.values, index=df.index)
     else:
-        ts = pd.to_datetime(df.index, utc=True)
-
-    session_id = ((ts.dt.tz_localize(None) - pd.Timedelta(hours=session_reset_hour_utc)).dt.date)
-    session_id = pd.Series(session_id.values, index=df.index)
+        shifted = pd.DatetimeIndex(pd.to_datetime(df.index, utc=True)) - pd.Timedelta(hours=session_reset_hour_utc)
+        session_id = pd.Series(shifted.date, index=df.index)
 
     pv = typical_price * volume
     cum_pv = pv.groupby(session_id).cumsum()
@@ -74,19 +73,22 @@ def vwap(df: pd.DataFrame, session_reset_hour_utc: int = 0) -> pd.Series:
 
 def williams_fractals(df: pd.DataFrame, window: int = 2):
     """Fractales de Bill Williams: devuelve (fractal_up, fractal_down) booleanos.
-    Un fractal alcista (resistencia) es un high mayor que `window` velas a cada lado;
-    uno bajista (soporte), un low menor que `window` velas a cada lado."""
+    Un fractal alcista (resistencia) es un high estrictamente mayor que las
+    `window` velas a cada lado; uno bajista (soporte), un low estrictamente
+    menor. Vectorizado: O(window) pasadas sobre la serie en vez de un loop
+    por vela, porque esto corre en cada ciclo del loop principal."""
     high, low = df["high"], df["low"]
-    n = len(df)
-    fractal_up = pd.Series(False, index=df.index)
-    fractal_down = pd.Series(False, index=df.index)
+    fractal_up = pd.Series(True, index=df.index)
+    fractal_down = pd.Series(True, index=df.index)
 
-    for i in range(window, n - window):
-        h_slice = high.iloc[i - window: i + window + 1]
-        l_slice = low.iloc[i - window: i + window + 1]
-        if high.iloc[i] == h_slice.max() and (h_slice == h_slice.max()).sum() == 1:
-            fractal_up.iloc[i] = True
-        if low.iloc[i] == l_slice.min() and (l_slice == l_slice.min()).sum() == 1:
-            fractal_down.iloc[i] = True
+    for k in range(1, window + 1):
+        fractal_up &= (high > high.shift(k)) & (high > high.shift(-k))
+        fractal_down &= (low < low.shift(k)) & (low < low.shift(-k))
 
-    return fractal_up, fractal_down
+    # Los bordes no tienen `window` vecinos a ambos lados: nunca son fractal.
+    fractal_up.iloc[:window] = False
+    fractal_up.iloc[-window:] = False
+    fractal_down.iloc[:window] = False
+    fractal_down.iloc[-window:] = False
+
+    return fractal_up.fillna(False), fractal_down.fillna(False)

@@ -44,8 +44,19 @@ int OnInit()
 {
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetDeviationInPoints(30);
-   trade.SetTypeFilling(ORDER_FILLING_IOC);
 
+   // Usar el filling mode que el simbolo soporta; IOC fijo hace que brokers
+   // solo-FOK rechacen todas las ordenes.
+   long filling = SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
+   if((filling & SYMBOL_FILLING_IOC) != 0)
+      trade.SetTypeFilling(ORDER_FILLING_IOC);
+   else if((filling & SYMBOL_FILLING_FOK) != 0)
+      trade.SetTypeFilling(ORDER_FILLING_FOK);
+   else
+      trade.SetTypeFilling(ORDER_FILLING_RETURN);
+
+   // FolderCreate no crea rutas anidadas de una vez: primero el padre.
+   FolderCreate("bot_bridge", FILE_COMMON);
    FolderCreate(CommandsDir, FILE_COMMON);
    FolderCreate(AcksDir, FILE_COMMON);
    FolderCreate(StatusDir, FILE_COMMON);
@@ -242,7 +253,7 @@ void WriteAck(const string id, const bool ok, const ulong ticket, const uint ret
    FileClose(fh);
 
    FileDelete(final_path, FILE_COMMON);
-   FileMove(tmp_path, FILE_COMMON, final_path, FILE_REWRITE);
+   FileMove(tmp_path, FILE_COMMON, final_path, FILE_COMMON | FILE_REWRITE);
 }
 
 //+------------------------------------------------------------------+
@@ -288,5 +299,5 @@ void WriteStatus()
 
    FileClose(fh);
    FileDelete(final_path, FILE_COMMON);
-   FileMove(tmp_path, FILE_COMMON, final_path, FILE_REWRITE);
+   FileMove(tmp_path, FILE_COMMON, final_path, FILE_COMMON | FILE_REWRITE);
 }

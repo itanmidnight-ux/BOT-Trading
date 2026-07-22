@@ -48,6 +48,9 @@ class GridSession:
     def total_volume_opened(self) -> float:
         return sum(l.volume for l in self.levels if l.opened)
 
+    def opened_level_tickets(self) -> List[int]:
+        return [l.ticket for l in self.levels if l.opened and l.ticket is not None and l.ticket > 0]
+
     def next_pending_level(self, current_price: float) -> Optional[GridLevel]:
         for level in self.levels:
             if level.opened:

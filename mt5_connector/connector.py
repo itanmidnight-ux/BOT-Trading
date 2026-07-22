@@ -158,6 +158,18 @@ class MT5Connector:
     # ------------------------------------------------------------------
     # Ordenes
     # ------------------------------------------------------------------
+    def _order_filling_mode(self):
+        """Elige el filling mode que el simbolo realmente soporta (bitmask
+        SYMBOL_FILLING_*). Muchos brokers de XAUUSD solo aceptan FOK; con IOC
+        hardcodeado esas cuentas rechazarian todas las ordenes."""
+        info = self.get_symbol_info()
+        modes = getattr(info, "filling_mode", 0)
+        if modes & 2:  # SYMBOL_FILLING_IOC
+            return mt5.ORDER_FILLING_IOC
+        if modes & 1:  # SYMBOL_FILLING_FOK
+            return mt5.ORDER_FILLING_FOK
+        return mt5.ORDER_FILLING_RETURN
+
     def send_market_order(self, direction: int, volume: float, sl: float, tp: Optional[float],
                            comment: str = "", magic: int = None):
         """direction: 1 = BUY, -1 = SELL. Devuelve el OrderSendResult de mt5."""
@@ -177,7 +189,7 @@ class MT5Connector:
             "magic": magic or config.BRIDGE_MAGIC,
             "comment": comment[:31],
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": self._order_filling_mode(),
         }
         if tp is not None:
             request["tp"] = tp
@@ -210,7 +222,7 @@ class MT5Connector:
             "magic": position.magic,
             "comment": comment[:31],
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": self._order_filling_mode(),
         }
 
         if config.DRY_RUN:

@@ -67,8 +67,11 @@ class ProfitManager:
     def forget_position(self, ticket: int):
         self._trackers.pop(ticket, None)
 
+    def has_position(self, ticket: int) -> bool:
+        return ticket in self._trackers
+
     def evaluate(self, ticket: int, current_price: float, current_sl: float,
-                 atr_value: float) -> List[ProfitAction]:
+                 atr_value: float, min_stop_distance: float = 0.0) -> List[ProfitAction]:
         tracker = self._trackers.get(ticket)
         if tracker is None:
             return []
@@ -117,7 +120,9 @@ class ProfitManager:
                 self.forget_position(ticket)
                 return actions
 
-            trail_distance = config.ATR_TRAIL_DISTANCE_MULTIPLIER * atr_value
+            # El trailing nunca puede quedar mas cerca del precio que la
+            # distancia minima del broker (stops_level), o el modify seria rechazado.
+            trail_distance = max(config.ATR_TRAIL_DISTANCE_MULTIPLIER * atr_value, min_stop_distance)
             candidate_sl = current_price - direction * trail_distance
             improves = (
                 tracker.last_trailing_sl is None
